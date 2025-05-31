@@ -1,9 +1,15 @@
+mod send_event;
+
 use std::{convert::Infallible, path::PathBuf, time::Duration};
 
-use axum::{extract::State, response::{sse::Event, Sse}, routing::{get, get_service}, Router};
+use axum::{
+    Router,
+    extract::State,
+    response::{Sse, sse::Event},
+    routing::{get, get_service, post},
+};
 use axum_extra::TypedHeader;
 use futures_util::stream::Stream;
-use serde::Deserialize;
 use tokio::sync::broadcast;
 use tower_http::{services::ServeFile, trace::TraceLayer};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
@@ -20,11 +26,6 @@ impl AppState {
         let (tx, _rx) = broadcast::channel(800);
         return Self { tx: tx };
     }
-}
-
-#[derive(Deserialize, Debug)]
-pub struct PostEventPayload {
-
 }
 
 #[tokio::main]
@@ -54,7 +55,8 @@ fn app() -> Router {
     let app_state = AppState::new();
 
     return Router::new()
-        .route("/sse", get(sse_handler))
+        .route("/events", get(sse_handler))
+        .route("/events/send", post(send_event::handler))
         .route("/", get_service(static_files_service))
         .fallback_service(fallback_service)
         .layer(TraceLayer::new_for_http())
