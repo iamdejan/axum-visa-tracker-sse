@@ -1,6 +1,9 @@
-use std::path::PathBuf;
+use std::{convert::Infallible, path::PathBuf, time::Duration};
 
-use axum::{Router, routing::get_service};
+use axum::{response::{sse::Event, Sse}, routing::{get, get_service}, Router};
+use axum_extra::TypedHeader;
+use tokio_stream::StreamExt as _;
+use futures_util::stream::{self, Stream};
 use tower_http::{services::ServeFile, trace::TraceLayer};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
@@ -28,7 +31,24 @@ fn app() -> Router {
     let static_files_service = ServeFile::new(assets_dir.clone().join("index.html"));
     let fallback_service = ServeFile::new(assets_dir.clone().join("fallback.html"));
     return Router::new()
+        .route("/sse", get(sse_handler))
         .route("/", get_service(static_files_service))
         .fallback_service(fallback_service)
         .layer(TraceLayer::new_for_http());
+}
+
+async fn sse_handler(
+    TypedHeader(user_agent): TypedHeader<headers::UserAgent>,
+) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
+    tracing::debug!("{} connected", user_agent.as_str());
+
+    let stream = stream::repeat_with(|| Event::default().data("hi"))
+        .map(Ok)
+        .throttle(Duration::from_secs(1));
+
+    return Sse::new(stream).keep_alive(
+        axum::response::sse::KeepAlive::new()
+            .interval(Duration::from_secs(1))
+            .text("keep-alive-text"),
+    );
 }
