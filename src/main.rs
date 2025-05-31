@@ -1,6 +1,6 @@
 mod send_event;
 
-use std::{convert::Infallible, path::PathBuf, time::Duration};
+use std::{convert::Infallible, path::PathBuf};
 
 use axum::{
     Router,
@@ -86,9 +86,5 @@ async fn sse_handler(
         }
     };
 
-    return Sse::new(stream).keep_alive(
-        axum::response::sse::KeepAlive::new()
-            .interval(Duration::from_secs(1))
-            .text("keep-alive-text"),
-    );
+    return Sse::new(stream).keep_alive(axum::response::sse::KeepAlive::default());
 }
