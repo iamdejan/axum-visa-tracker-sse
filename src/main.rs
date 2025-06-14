@@ -1,32 +1,15 @@
-mod send_event;
+mod event;
 
-use std::{convert::Infallible, path::PathBuf};
+use std::path::PathBuf;
 
 use axum::{
     Router,
-    extract::State,
-    response::{Sse, sse::Event},
     routing::{get, get_service, post},
 };
-use axum_extra::TypedHeader;
-use futures_util::stream::Stream;
-use tokio::sync::broadcast;
 use tower_http::{services::ServeFile, trace::TraceLayer};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
-type AppEvent = String;
-
-#[derive(Clone)]
-pub struct AppState {
-    tx: broadcast::Sender<AppEvent>,
-}
-
-impl AppState {
-    pub fn new() -> Self {
-        let (tx, _rx) = broadcast::channel(800);
-        return Self { tx: tx };
-    }
-}
+use crate::event::AppState;
 
 #[tokio::main]
 async fn main() {
@@ -55,36 +38,10 @@ fn app() -> Router {
     let app_state = AppState::new();
 
     return Router::new()
-        .route("/events", get(sse_handler))
-        .route("/events/send", post(send_event::handler))
+        .route("/events", get(event::subscribe))
+        .route("/events/send", post(event::send))
         .route("/", get_service(static_files_service))
         .fallback_service(fallback_service)
         .layer(TraceLayer::new_for_http())
         .with_state(app_state);
-}
-
-async fn sse_handler(
-    State(state): State<AppState>,
-    TypedHeader(user_agent): TypedHeader<headers::UserAgent>,
-) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
-    tracing::debug!("{} connected", user_agent.as_str());
-
-    let mut rx = state.tx.subscribe();
-
-    let stream = async_stream::stream! {
-        loop {
-            match rx.recv().await {
-                Ok(msg) => {
-                    let event = Event::default().data(msg);
-                    yield Ok(event);
-                }
-                Err(err) => {
-                    tracing::error!("Error: {}", err);
-                    break;
-                }
-            }
-        }
-    };
-
-    return Sse::new(stream).keep_alive(axum::response::sse::KeepAlive::default());
 }
