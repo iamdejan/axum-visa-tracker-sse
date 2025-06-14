@@ -30,7 +30,7 @@ pub async fn send(
 ) -> (StatusCode, String) {
     let percentage = payload.percentage;
     if percentage < 0.0 || percentage > 100.0 {
-        return (StatusCode::BAD_REQUEST, "Percentage exceeds limit".to_string());
+        return (StatusCode::BAD_REQUEST, String::from("Percentage exceeds limit"));
     }
 
     match state.tx.send(payload.clone()) {
