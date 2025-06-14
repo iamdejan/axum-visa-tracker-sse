@@ -3,10 +3,10 @@ mod event;
 use std::path::PathBuf;
 
 use axum::{
-    Router,
-    routing::{get, get_service, post},
+    http::Method, routing::{get, get_service, post}, Router
 };
 use tower_http::{services::ServeFile, trace::TraceLayer};
+use tower_http::cors::{CorsLayer, Any};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 use crate::event::AppState;
@@ -37,11 +37,15 @@ fn app() -> Router {
 
     let app_state = AppState::new();
 
+    // ref: https://dev.to/amaendeepm/axum-in-rus-flexibility-cors-control-and-tower-power-4ich
+    let cors_layer = CorsLayer::new().allow_origin(Any).allow_methods([Method::GET, Method::POST]);
+
     return Router::new()
         .route("/events", get(event::subscribe))
         .route("/events/send", post(event::send))
         .route("/", get_service(static_files_service))
         .fallback_service(fallback_service)
         .layer(TraceLayer::new_for_http())
+        .layer(cors_layer)
         .with_state(app_state);
 }
