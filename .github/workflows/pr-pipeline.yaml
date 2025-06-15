@@ -11,4 +11,4 @@ jobs:
       - uses: actions/checkout@v4
       - run: rustup default stable && rustup update
       - run: cargo fmt --check
-      - run: cargo check
+      - run: cargo build
