@@ -5,8 +5,7 @@ use std::path::PathBuf;
 use axum::{
     http::Method, routing::{get, get_service, post}, Router
 };
-use tower_http::{services::ServeFile, trace::TraceLayer};
-use tower_http::cors::{CorsLayer, Any};
+use tower_http::{cors::{Any, CorsLayer}, services::ServeFile, trace::TraceLayer};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 use crate::event::AppState;
