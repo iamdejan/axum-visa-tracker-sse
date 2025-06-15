@@ -1,16 +1,19 @@
 use axum::{
-    extract::{rejection::JsonRejection, State}, http::StatusCode, response::{sse::Event, IntoResponse, Sse}, Json
+    Json,
+    extract::{State, rejection::JsonRejection},
+    http::StatusCode,
+    response::{IntoResponse, Sse, sse::Event},
 };
-use tokio::sync::broadcast;
-use axum_extra::{extract::WithRejection, TypedHeader};
+use axum_extra::{TypedHeader, extract::WithRejection};
 use futures_util::stream::Stream;
 use serde::{Deserialize, Serialize};
+use thiserror::Error;
+use tokio::sync::broadcast;
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct AppEvent {
     percentage: f64,
 }
-
 
 #[derive(Clone)]
 pub struct AppState {
@@ -25,25 +28,28 @@ impl AppState {
 }
 
 #[derive(Serialize, Debug)]
-pub struct ErrorResponse {
-    error: ErrorDetail
+pub struct EventResponse {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    data: Option<EventData>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    error: Option<ErrorDetail>,
+}
+
+#[derive(Serialize, Debug)]
+pub struct EventData {
+    message: String,
 }
 
 #[derive(Serialize, Debug)]
 pub struct ErrorDetail {
     code: String,
-    message: String
+    message: String,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Error)]
 pub enum AppError {
-    Json(JsonRejection)
-}
-
-impl From<JsonRejection> for AppError {
-    fn from(value: JsonRejection) -> Self {
-        return AppError::Json(value);
-    }
+    #[error(transparent)]
+    Json(#[from] JsonRejection),
 }
 
 impl IntoResponse for AppError {
@@ -51,49 +57,47 @@ impl IntoResponse for AppError {
         let (status, error_detail) = match self {
             AppError::Json(rejection) => {
                 let (status, message, code) = match rejection {
-                    JsonRejection::MissingJsonContentType(_) => {
-                        (
-                            StatusCode::BAD_REQUEST,
-                            "Missing or invalid Content-Type header. Expected 'application/json'".to_string(),
-                            "MISSING_JSON_CONTENT_TYPE".to_string(),
-                        )
-                    },
-                    JsonRejection::JsonDataError(json_data_error) => {
-                        (
-                            StatusCode::BAD_REQUEST,
-                            json_data_error.body_text(),
-                            "JSON_DESERIALIZATION_ERROR".to_string(),
-                        )
-                    },
-                    JsonRejection::JsonSyntaxError(json_syntax_error) => {
-                        (
-                            StatusCode::BAD_REQUEST,
-                            json_syntax_error.body_text(),
-                            "JSON_VALIDITY_ERROR".to_string(),
-                        )
-                    },
-                    JsonRejection::BytesRejection(bytes_rejection) => {
-                        (
-                            StatusCode::BAD_REQUEST,
-                            bytes_rejection.body_text(),
-                            "BUFFER_ERROR".to_string(),
-                        )
-                    },
-                    _ => {
-                        (
-                            StatusCode::INTERNAL_SERVER_ERROR,
-                            "An unexpected error occured".to_string(),
-                            "UNKNOWN_ERROR".to_string()
-                        )
-                    },
+                    JsonRejection::MissingJsonContentType(_) => (
+                        StatusCode::BAD_REQUEST,
+                        "Missing or invalid Content-Type header. Expected 'application/json'"
+                            .to_string(),
+                        "MISSING_JSON_CONTENT_TYPE".to_string(),
+                    ),
+                    JsonRejection::JsonDataError(json_data_error) => (
+                        StatusCode::BAD_REQUEST,
+                        json_data_error.body_text(),
+                        "JSON_DESERIALIZATION_ERROR".to_string(),
+                    ),
+                    JsonRejection::JsonSyntaxError(json_syntax_error) => (
+                        StatusCode::BAD_REQUEST,
+                        json_syntax_error.body_text(),
+                        "JSON_VALIDITY_ERROR".to_string(),
+                    ),
+                    JsonRejection::BytesRejection(bytes_rejection) => (
+                        StatusCode::BAD_REQUEST,
+                        bytes_rejection.body_text(),
+                        "BUFFER_ERROR".to_string(),
+                    ),
+                    _ => (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        "An unexpected error occured".to_string(),
+                        "UNKNOWN_ERROR".to_string(),
+                    ),
                 };
 
-                (status, ErrorDetail { code: code, message: message })
+                (
+                    status,
+                    ErrorDetail {
+                        code: code,
+                        message: message,
+                    },
+                )
             }
         };
 
-        let error_respnose = ErrorResponse {
-            error: error_detail
+        let error_respnose = EventResponse {
+            data: None,
+            error: Some(error_detail),
         };
 
         return (status, Json(error_respnose)).into_response();
@@ -103,24 +107,52 @@ impl IntoResponse for AppError {
 pub async fn send(
     State(state): State<AppState>,
     WithRejection(Json(payload), _): WithRejection<Json<AppEvent>, AppError>,
-) -> (StatusCode, String) {
+) -> (StatusCode, Json<EventResponse>) {
     let percentage = payload.percentage;
     if percentage < 0.0 || percentage > 100.0 {
-        return (StatusCode::BAD_REQUEST, String::from("Percentage exceeds limit"));
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(EventResponse {
+                data: None,
+                error: Some(ErrorDetail {
+                    code: "RANGE_EXCEEDED_ERROR".to_string(),
+                    message: format!(
+                        "Percentage range is exceeded. It should be within 0-100, but got {}",
+                        percentage
+                    )
+                    .to_string(),
+                }),
+            }),
+        );
     }
 
     match state.tx.send(payload.clone()) {
         Ok(num_receivers) => {
             let response_msg = format!("Event sent to {} listeners!", num_receivers);
-            return (StatusCode::OK, response_msg);
+            return (
+                StatusCode::OK,
+                Json(EventResponse {
+                    data: Some(EventData {
+                        message: response_msg,
+                    }),
+                    error: None,
+                }),
+            );
         }
         Err(_) => {
             let response_msg = "Event accepted, but no listeners".to_string();
-            return (StatusCode::ACCEPTED, response_msg);
+            return (
+                StatusCode::ACCEPTED,
+                Json(EventResponse {
+                    data: Some(EventData {
+                        message: response_msg,
+                    }),
+                    error: None,
+                }),
+            );
         }
     }
 }
-
 
 pub async fn subscribe(
     State(state): State<AppState>,
