@@ -7,7 +7,6 @@ use axum::{
 use axum_extra::{TypedHeader, extract::WithRejection};
 use futures_util::stream::Stream;
 use serde::{Deserialize, Serialize};
-use thiserror::Error;
 use tokio::sync::broadcast;
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -46,10 +45,15 @@ pub struct ErrorDetail {
     message: String,
 }
 
-#[derive(Debug, Error)]
+#[derive(Debug)]
 pub enum AppError {
-    #[error(transparent)]
-    Json(#[from] JsonRejection),
+    Json(JsonRejection)
+}
+
+impl From<JsonRejection> for AppError {
+    fn from(value: JsonRejection) -> Self {
+        return AppError::Json(value);
+    }
 }
 
 impl IntoResponse for AppError {
@@ -104,6 +108,7 @@ impl IntoResponse for AppError {
     }
 }
 
+#[axum::debug_handler]
 pub async fn send(
     State(state): State<AppState>,
     WithRejection(Json(payload), _): WithRejection<Json<AppEvent>, AppError>,
