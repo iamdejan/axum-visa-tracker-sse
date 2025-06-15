@@ -1,0 +1,13 @@
+name: PR Pipeline
+on:
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  pipeline:
+    runs_on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - run: rustup default stable && rustup update
+      - run: cargo fmt
