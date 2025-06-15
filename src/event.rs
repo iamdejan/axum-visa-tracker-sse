@@ -46,65 +46,60 @@ pub struct ErrorDetail {
 }
 
 #[derive(Debug)]
-pub enum AppError {
-    Json(JsonRejection)
+pub struct AppError {
+    error: ErrorDetail,
+    status_code: StatusCode,
 }
 
 impl From<JsonRejection> for AppError {
     fn from(value: JsonRejection) -> Self {
-        return AppError::Json(value);
+        match value {
+            JsonRejection::MissingJsonContentType(missing_json_content_type) => AppError {
+                error: ErrorDetail {
+                    code: "MISSING_JSON_CONTENT_TYPE".to_string(),
+                    message: missing_json_content_type.to_string(),
+                },
+                status_code: StatusCode::BAD_REQUEST,
+            },
+            JsonRejection::JsonDataError(json_data_error) => AppError {
+                error: ErrorDetail {
+                    code: "JSON_DESERIALIZATION_ERROR".to_string(),
+                    message: json_data_error.body_text(),
+                },
+                status_code: StatusCode::BAD_REQUEST,
+            },
+            JsonRejection::JsonSyntaxError(json_syntax_error) => AppError {
+                error: ErrorDetail {
+                    code: "JSON_VALIDITY_ERROR".to_string(),
+                    message: json_syntax_error.body_text(),
+                },
+                status_code: StatusCode::BAD_REQUEST,
+            },
+            JsonRejection::BytesRejection(bytes_rejection) => AppError {
+                error: ErrorDetail {
+                    code: "BUFFER_ERROR".to_string(),
+                    message: bytes_rejection.body_text(),
+                },
+                status_code: StatusCode::BAD_REQUEST,
+            },
+            _ => AppError {
+                error: ErrorDetail {
+                    code: "UNKNOWN_ERROR".to_string(),
+                    message: "An unexpected error occured".to_string(),
+                },
+                status_code: StatusCode::INTERNAL_SERVER_ERROR,
+            },
+        }
     }
 }
 
 impl IntoResponse for AppError {
     fn into_response(self) -> axum::response::Response {
-        let (status, error_detail) = match self {
-            AppError::Json(rejection) => {
-                let (status, message, code) = match rejection {
-                    JsonRejection::MissingJsonContentType(_) => (
-                        StatusCode::BAD_REQUEST,
-                        "Missing or invalid Content-Type header. Expected 'application/json'"
-                            .to_string(),
-                        "MISSING_JSON_CONTENT_TYPE".to_string(),
-                    ),
-                    JsonRejection::JsonDataError(json_data_error) => (
-                        StatusCode::BAD_REQUEST,
-                        json_data_error.body_text(),
-                        "JSON_DESERIALIZATION_ERROR".to_string(),
-                    ),
-                    JsonRejection::JsonSyntaxError(json_syntax_error) => (
-                        StatusCode::BAD_REQUEST,
-                        json_syntax_error.body_text(),
-                        "JSON_VALIDITY_ERROR".to_string(),
-                    ),
-                    JsonRejection::BytesRejection(bytes_rejection) => (
-                        StatusCode::BAD_REQUEST,
-                        bytes_rejection.body_text(),
-                        "BUFFER_ERROR".to_string(),
-                    ),
-                    _ => (
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        "An unexpected error occured".to_string(),
-                        "UNKNOWN_ERROR".to_string(),
-                    ),
-                };
-
-                (
-                    status,
-                    ErrorDetail {
-                        code: code,
-                        message: message,
-                    },
-                )
-            }
-        };
-
-        let error_respnose = EventResponse {
+        let response = EventResponse {
             data: None,
-            error: Some(error_detail),
+            error: Some(self.error),
         };
-
-        return (status, Json(error_respnose)).into_response();
+        return (self.status_code, Json(response)).into_response();
     }
 }
 
@@ -162,7 +157,7 @@ pub async fn send(
 pub async fn subscribe(
     State(state): State<AppState>,
     TypedHeader(user_agent): TypedHeader<headers::UserAgent>,
-) -> Sse<impl Stream<Item = Result<Event, serde_json::Error>>> {
+) -> Sse<impl Stream<Item = Result<Event, axum::Error>>> {
     tracing::debug!("{} connected", user_agent.as_str());
 
     let mut rx = state.tx.subscribe();
@@ -171,8 +166,7 @@ pub async fn subscribe(
         loop {
             match rx.recv().await {
                 Ok(msg) => {
-                    let json_data = serde_json::to_string(&msg)?;
-                    let event = Event::default().data(json_data.as_str());
+                    let event = Event::default().json_data(msg)?;
                     yield Ok(event);
                 }
                 Err(err) => {
