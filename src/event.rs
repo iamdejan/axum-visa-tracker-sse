@@ -157,7 +157,7 @@ pub async fn send(
 pub async fn subscribe(
     State(state): State<AppState>,
     TypedHeader(user_agent): TypedHeader<headers::UserAgent>,
-) -> Sse<impl Stream<Item = Result<Event, serde_json::Error>>> {
+) -> Sse<impl Stream<Item = Result<Event, axum::Error>>> {
     tracing::debug!("{} connected", user_agent.as_str());
 
     let mut rx = state.tx.subscribe();
@@ -166,8 +166,7 @@ pub async fn subscribe(
         loop {
             match rx.recv().await {
                 Ok(msg) => {
-                    let json_data = serde_json::to_string(&msg)?;
-                    let event = Event::default().data(json_data.as_str());
+                    let event = Event::default().json_data(msg)?;
                     yield Ok(event);
                 }
                 Err(err) => {
