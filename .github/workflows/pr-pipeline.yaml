@@ -10,4 +10,5 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: rustup default stable && rustup update
-      - run: cargo fmt
+      - run: cargo fmt --check
+      - run: cargo check
