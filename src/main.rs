@@ -1,6 +1,6 @@
 mod event;
 
-use std::path::PathBuf;
+use std::{path::PathBuf, sync::Arc};
 
 use axum::{
     Router,
@@ -40,7 +40,7 @@ fn app() -> Router {
     let static_files_service = ServeFile::new(assets_dir.clone().join("index.html"));
     let fallback_service = ServeFile::new(assets_dir.clone().join("fallback.html"));
 
-    let app_state = AppState::new();
+    let app_state = Arc::new(AppState::new());
 
     // ref: https://dev.to/amaendeepm/axum-in-rus-flexibility-cors-control-and-tower-power-4ich
     let cors_layer = CorsLayer::new()

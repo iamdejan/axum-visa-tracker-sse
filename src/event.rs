@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use axum::{
     Json,
     extract::{State, rejection::JsonRejection},
@@ -105,7 +107,7 @@ impl IntoResponse for AppError {
 
 #[axum::debug_handler]
 pub async fn send(
-    State(state): State<AppState>,
+    State(state): State<Arc<AppState>>,
     WithRejection(Json(payload), _): WithRejection<Json<AppEvent>, AppError>,
 ) -> (StatusCode, Json<EventResponse>) {
     let percentage = payload.percentage;
@@ -155,7 +157,7 @@ pub async fn send(
 }
 
 pub async fn subscribe(
-    State(state): State<AppState>,
+    State(state): State<Arc<AppState>>,
     TypedHeader(user_agent): TypedHeader<headers::UserAgent>,
 ) -> Sse<impl Stream<Item = Result<Event, axum::Error>>> {
     tracing::debug!("{} connected", user_agent.as_str());
